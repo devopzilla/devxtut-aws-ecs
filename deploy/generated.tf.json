@@ -1,0 +1,248 @@
+{
+  "data": {
+    "aws_availability_zones": {
+      "azs": {
+        "state": "available"
+      }
+    },
+    "aws_route53_zone": {
+      "guku_io": {
+        "name": "guku.io",
+        "private_zone": false
+      }
+    }
+  },
+  "provider": {
+    "aws": {
+      "region": "us-west-1"
+    }
+  },
+  "module": {
+    "vpc_tutorial": {
+      "source": "terraform-aws-modules/vpc/aws",
+      "version": "3.12.0",
+      "name": "tutorial",
+      "cidr": "10.0.0.0/16",
+      "azs": [
+        "${data.aws_availability_zones.azs.names[0]}",
+        "${data.aws_availability_zones.azs.names[1]}"
+      ],
+      "private_subnets": [
+        "10.0.1.0/24",
+        "10.0.2.0/24"
+      ],
+      "public_subnets": [
+        "10.0.101.0/24",
+        "10.0.102.0/24"
+      ],
+      "enable_nat_gateway": true,
+      "single_nat_gateway": true,
+      "enable_vpn_gateway": false,
+      "enable_dns_support": true,
+      "enable_dns_hostnames": true,
+      "tags": {
+        "terraform": "true"
+      }
+    },
+    "ecs_tutorial": {
+      "source": "terraform-aws-modules/ecs/aws",
+      "version": "4.1.2",
+      "cluster_name": "tutorial",
+      "cluster_configuration": {
+        "execute_command_configuration": {
+          "kms_key_id": "${aws_kms_key.ecs_tutorial.arn}",
+          "logging": "OVERRIDE",
+          "log_configuration": {
+            "cloud_watch_encryption_enabled": true,
+            "cloud_watch_log_group_name": "${aws_cloudwatch_log_group.ecs_tutorial.name}"
+          }
+        }
+      },
+      "fargate_capacity_providers": {
+        "FARGATE_SPOT": {
+          "default_capacity_provider_strategy": {}
+        }
+      },
+      "tags": {
+        "terraform": "true"
+      }
+    }
+  },
+  "resource": {
+    "aws_lb": {
+      "gateway_tutorial": {
+        "name": "tutorial",
+        "internal": false,
+        "security_groups": [
+          "${aws_security_group.gateway_tutorial.id}"
+        ],
+        "load_balancer_type": "application",
+        "subnets": "${module.vpc_tutorial.public_subnets}",
+        "tags": {
+          "terraform": "true"
+        }
+      }
+    },
+    "aws_security_group": {
+      "gateway_tutorial": {
+        "name": "gateway-tutorial",
+        "vpc_id": "${module.vpc_tutorial.vpc_id}",
+        "ingress": [
+          {
+            "protocol": "tcp",
+            "from_port": 80,
+            "to_port": 80,
+            "description": null,
+            "ipv6_cidr_blocks": null,
+            "prefix_list_ids": null,
+            "self": null,
+            "cidr_blocks": [
+              "0.0.0.0/0"
+            ],
+            "security_groups": null
+          },
+          {
+            "protocol": "tcp",
+            "from_port": 443,
+            "to_port": 443,
+            "description": null,
+            "ipv6_cidr_blocks": null,
+            "prefix_list_ids": null,
+            "self": null,
+            "cidr_blocks": [
+              "0.0.0.0/0"
+            ],
+            "security_groups": null
+          }
+        ],
+        "egress": [
+          {
+            "from_port": 0,
+            "to_port": 0,
+            "protocol": "-1",
+            "cidr_blocks": [
+              "0.0.0.0/0"
+            ],
+            "description": null,
+            "ipv6_cidr_blocks": null,
+            "prefix_list_ids": null,
+            "self": null,
+            "security_groups": null
+          }
+        ],
+        "tags": {
+          "terraform": "true"
+        }
+      }
+    },
+    "aws_lb_listener": {
+      "gateway_tutorial_80": {
+        "load_balancer_arn": "${resource.aws_lb.gateway_tutorial.arn}",
+        "port": 80,
+        "protocol": "HTTP",
+        "default_action": {
+          "type": "fixed-response",
+          "fixed_response": {
+            "content_type": "text/plain",
+            "message_body": "Not Found",
+            "status_code": "404"
+          }
+        },
+        "tags": {
+          "terraform": "true"
+        }
+      },
+      "gateway_tutorial_443": {
+        "load_balancer_arn": "${resource.aws_lb.gateway_tutorial.arn}",
+        "port": 443,
+        "protocol": "HTTPS",
+        "default_action": {
+          "type": "fixed-response",
+          "fixed_response": {
+            "content_type": "text/plain",
+            "message_body": "Not Found",
+            "status_code": "404"
+          }
+        },
+        "ssl_policy": "ELBSecurityPolicy-TLS-1-1-2017-01",
+        "tags": {
+          "terraform": "true"
+        },
+        "certificate_arn": "${aws_acm_certificate_validation.tutorial_0.certificate_arn}"
+      }
+    },
+    "aws_kms_key": {
+      "ecs_tutorial": {
+        "description": "ecs_tutorial log encryption key",
+        "deletion_window_in_days": 7,
+        "tags": {
+          "terraform": "true"
+        }
+      }
+    },
+    "aws_cloudwatch_log_group": {
+      "ecs_tutorial": {
+        "name": "/aws/ecs/tutorial",
+        "retention_in_days": 7,
+        "tags": {
+          "terraform": "true"
+        }
+      }
+    },
+    "aws_route53_record": {
+      "tutorial_0": {
+        "zone_id": "${data.aws_route53_zone.guku_io.zone_id}",
+        "name": "tutorial-aws-ecs.guku.io",
+        "type": "A",
+        "alias": {
+          "name": "${aws_lb.gateway_tutorial.dns_name}",
+          "zone_id": "${aws_lb.gateway_tutorial.zone_id}",
+          "evaluate_target_health": true
+        }
+      },
+      "zone_0": {
+        "for_each": "${{for dvo in aws_acm_certificate.tutorial_0.domain_validation_options : dvo.domain_name =\u003e {name=dvo.resource_record_name, record=dvo.resource_record_value, type=dvo.resource_record_type}}}",
+        "allow_overwrite": true,
+        "name": "${each.value.name}",
+        "records": [
+          "${each.value.record}"
+        ],
+        "ttl": 60,
+        "type": "${each.value.type}",
+        "zone_id": "${data.aws_route53_zone.guku_io.zone_id}"
+      }
+    },
+    "aws_acm_certificate": {
+      "tutorial_0": {
+        "domain_name": "tutorial-aws-ecs.guku.io",
+        "validation_method": "DNS"
+      }
+    },
+    "aws_acm_certificate_validation": {
+      "tutorial_0": {
+        "certificate_arn": "${aws_acm_certificate.tutorial_0.arn}",
+        "validation_record_fqdns": "${[for record in aws_route53_record.zone_0 : record.fqdn]}"
+      }
+    }
+  },
+  "output": {
+    "vpc_tutorial_vpc_id": {
+      "value": "${module.vpc_tutorial.vpc_id}"
+    },
+    "vpc_tutorial_public_subnet_ids": {
+      "value": "${module.vpc_tutorial.public_subnets}"
+    },
+    "vpc_tutorial_private_subnet_ids": {
+      "value": "${module.vpc_tutorial.private_subnets}"
+    },
+    "gateway_tutorial_load_balancer_host": {
+      "value": "${aws_lb.gateway_tutorial.dns_name}"
+    },
+    "gateway_tutorial_security_group": {
+      "value": "${aws_security_group.gateway_tutorial.name}"
+    },
+    "ecs_tutorial_cluster_id": {
+      "value": "${module.ecs_tutorial.cluster_id}"
+    }
+  }
+}
